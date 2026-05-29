@@ -2,7 +2,7 @@
 
 import { Upload, X, CheckCircle, AlertCircle, Loader2, ChevronDown, ChevronUp } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
-import { Toast } from "./NotificationToast";
+import { useNotifications } from "@/context/NotificationContext";
 
 const MAX_SIZE = 20 * 1024 * 1024;
 const ALLOWED_EXT = ".pdf";
@@ -20,8 +20,6 @@ interface FileEntry {
 
 interface UploadZoneProps {
   onUploadComplete: () => void;
-  onToast: (toast: Toast) => void;
-  onDismissToast: (id: string) => void;
 }
 
 function formatSize(bytes: number) {
@@ -46,14 +44,13 @@ const STATUS_LABEL: Record<UploadStatus, string> = {
 
 const BULK_THRESHOLD = 3;
 
-export default function UploadZone({ onUploadComplete, onToast, onDismissToast }: UploadZoneProps) {
+export default function UploadZone({ onUploadComplete }: UploadZoneProps) {
+  const { addToast } = useNotifications();
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [dragging, setDragging] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const singleRef = useRef<HTMLInputElement>(null);
   const bulkRef = useRef<HTMLInputElement>(null);
-  // track active bulk toast id so we can dismiss it on completion
-  const bulkToastId = useRef<string | null>(null);
 
   const uploadFile = useCallback(
     (entry: FileEntry, jobId: string | null, jobTotal: number, onComplete: () => void) => {
@@ -116,10 +113,8 @@ export default function UploadZone({ onUploadComplete, onToast, onDismissToast }
 
       if (isBulk) {
         setCollapsed(true);
-        const toastId = `toast-progress-${jobId}`;
-        bulkToastId.current = toastId;
-        onToast({
-          id: toastId,
+        addToast({
+          id: `progress-${jobId}`,
           type: "progress",
           message: `Upload in progress — processing ${valid.length} files in background.`,
         });
@@ -131,7 +126,7 @@ export default function UploadZone({ onUploadComplete, onToast, onDismissToast }
         })
       );
     },
-    [uploadFile, onUploadComplete, onToast]
+    [uploadFile, onUploadComplete, addToast]
   );
 
   const onDrop = useCallback(
