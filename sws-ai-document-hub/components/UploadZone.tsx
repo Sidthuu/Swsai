@@ -4,6 +4,10 @@ import { Upload, X, CheckCircle, AlertCircle, Loader2, ChevronDown, ChevronUp } 
 import { useCallback, useRef, useState } from "react";
 import { Toast } from "./NotificationToast";
 
+const MAX_SIZE = 20 * 1024 * 1024;
+const ALLOWED_EXT = ".pdf";
+const ALLOWED_TYPE = "application/pdf";
+
 type UploadStatus = "pending" | "uploading" | "complete" | "failed";
 
 interface FileEntry {
@@ -11,6 +15,7 @@ interface FileEntry {
   file: File;
   progress: number;
   status: UploadStatus;
+  error?: string;
 }
 
 interface UploadZoneProps {
@@ -92,17 +97,22 @@ export default function UploadZone({ onUploadComplete, onToast, onDismissToast }
 
   const addFiles = useCallback(
     (files: File[]) => {
-      const isBulk = files.length > BULK_THRESHOLD;
+      const validated: FileEntry[] = files.map((file) => {
+        const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
+        if (ext !== ALLOWED_EXT || file.type !== ALLOWED_TYPE) {
+          return { id: `${Date.now()}-${Math.random()}`, file, progress: 0, status: "failed" as UploadStatus, error: "Only PDF files are allowed." };
+        }
+        if (file.size > MAX_SIZE) {
+          return { id: `${Date.now()}-${Math.random()}`, file, progress: 0, status: "failed" as UploadStatus, error: "Exceeds 20 MB limit." };
+        }
+        return { id: `${Date.now()}-${Math.random()}`, file, progress: 0, status: "pending" as UploadStatus };
+      });
+
+      const valid = validated.filter((e) => !e.error);
+      const isBulk = valid.length > BULK_THRESHOLD;
       const jobId = isBulk ? `job-${Date.now()}` : null;
 
-      const newEntries: FileEntry[] = files.map((file) => ({
-        id: `${Date.now()}-${Math.random()}`,
-        file,
-        progress: 0,
-        status: "pending" as UploadStatus,
-      }));
-
-      setEntries((prev) => [...prev, ...newEntries]);
+      setEntries((prev) => [...prev, ...validated]);
 
       if (isBulk) {
         setCollapsed(true);
@@ -111,12 +121,12 @@ export default function UploadZone({ onUploadComplete, onToast, onDismissToast }
         onToast({
           id: toastId,
           type: "progress",
-          message: `Upload in progress — processing ${files.length} files in background.`,
+          message: `Upload in progress — processing ${valid.length} files in background.`,
         });
       }
 
-      newEntries.forEach((entry) =>
-        uploadFile(entry, jobId, files.length, () => {
+      valid.forEach((entry) =>
+        uploadFile(entry, jobId, valid.length, () => {
           if (!isBulk) onUploadComplete();
         })
       );
@@ -222,6 +232,9 @@ export default function UploadZone({ onUploadComplete, onToast, onDismissToast }
                         <span className="text-xs text-slate-500 w-8 text-right">{entry.progress}%</span>
                       </div>
                     </div>
+                    {entry.error && (
+                      <p className="text-xs text-red-500 mb-1">{entry.error}</p>
+                    )}
                     <div className="h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
                       <div
                         className={`h-full rounded-full transition-all duration-300 ${

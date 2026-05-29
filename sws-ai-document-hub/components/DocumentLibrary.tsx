@@ -1,11 +1,13 @@
 "use client";
 
-import { Archive, Download, FileText } from "lucide-react";
+import { Archive, Download, FileText, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 interface Doc {
+  id: string;
   name: string;
   size: number;
+  type: string;
   uploadedAt: string;
   url: string;
 }
@@ -34,6 +36,15 @@ export default function DocumentLibrary({ refresh }: { refresh: number }) {
 
   useEffect(() => { fetchDocs(); }, [fetchDocs, refresh]);
 
+  const deleteDoc = async (id: string) => {
+    await fetch("/api/documents", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    setDocs((prev) => prev.filter((d) => d.id !== id));
+  };
+
   return (
     <div className="mt-10">
       <h3 className="mb-4 text-lg font-semibold text-slate-900">Document Library</h3>
@@ -51,27 +62,44 @@ export default function DocumentLibrary({ refresh }: { refresh: number }) {
               <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
                 <th className="px-5 py-3">Name</th>
                 <th className="px-5 py-3">Size</th>
+                <th className="px-5 py-3">Type</th>
                 <th className="px-5 py-3">Uploaded</th>
-                <th className="px-5 py-3 text-right">Download</th>
+                <th className="px-5 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {docs.map((doc, i) => (
-                <tr key={i} className="border-b border-slate-100 last:border-0 hover:bg-slate-50 transition">
+              {docs.map((doc) => (
+                <tr key={doc.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50 transition">
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-2">
                       <FileText size={16} className="text-blue-400 shrink-0" />
-                      <span className="font-medium text-slate-800 truncate max-w-[260px]">{doc.name}</span>
+                      <span className="font-medium text-slate-800 truncate max-w-[220px]">{doc.name}</span>
                     </div>
                   </td>
                   <td className="px-5 py-3 text-slate-500">{formatSize(doc.size)}</td>
+                  <td className="px-5 py-3">
+                    <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                      {doc.type || "unknown"}
+                    </span>
+                  </td>
                   <td className="px-5 py-3 text-slate-500">{formatDate(doc.uploadedAt)}</td>
                   <td className="px-5 py-3 text-right">
-                    <a href={doc.url} download
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-100 transition">
-                      <Download size={13} />
-                      Download
-                    </a>
+                    <div className="flex items-center justify-end gap-2">
+                      <a
+                        href={`/api/download?id=${doc.id}`}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-100 transition"
+                      >
+                        <Download size={13} />
+                        Download
+                      </a>
+                      <button
+                        onClick={() => deleteDoc(doc.id)}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-100 transition"
+                      >
+                        <Trash2 size={13} />
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
