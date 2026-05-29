@@ -1,6 +1,8 @@
+import DocumentLibrary from "@/components/DocumentLibrary";
 import Header from "@/components/header";
 import InfoBanner from "@/components/InfoBanner";
 import Tabs from "@/components/Tabs";
+import UploadZone from "@/components/UploadZone";
 
 export default function Home() {
   return (
@@ -9,6 +11,8 @@ export default function Home() {
       <Tabs />
       <section className="mx-auto max-w-5xl px-6 py-8">
         <InfoBanner />
+        <UploadZone />
+        <DocumentLibrary />
 
       </section>
     </main>
