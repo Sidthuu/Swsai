@@ -8,7 +8,7 @@ import Tabs from "@/components/Tabs";
 import UploadZone from "@/components/UploadZone";
 
 export default function Home() {
-  const { refresh, addToast } = useNotifications();
+  const { refresh } = useNotifications();
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -16,7 +16,7 @@ export default function Home() {
       <Tabs />
       <section className="mx-auto max-w-5xl px-6 py-8">
         <InfoBanner />
-        <UploadZone onUploadComplete={() => {}} />
+        <UploadZone />
         <DocumentLibrary refresh={refresh} />
       </section>
     </main>

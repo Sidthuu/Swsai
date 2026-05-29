@@ -17,6 +17,19 @@ const DB_PATH = path.join(process.cwd(), "data", "notifications.json");
 // In-process SSE client registry
 export const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
 
+// ── Mutex: serialise concurrent writes to notifications.json ─────────────────
+let notifLock: Promise<void> = Promise.resolve();
+
+async function withNotifLock<T>(fn: () => Promise<T>): Promise<T> {
+  let release!: () => void;
+  const next = new Promise<void>((res) => { release = res; });
+  const current = notifLock;
+  notifLock = next;
+  await current;
+  try { return await fn(); } finally { release(); }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function readNotifications(): Promise<Notification[]> {
   if (!existsSync(DB_PATH)) return [];
   try {
@@ -46,12 +59,12 @@ export async function createNotification(
     isRead: false,
   };
 
-  const existing = await readNotifications();
-  await writeNotifications([notification, ...existing]);
+  await withNotifLock(async () => {
+    const existing = await readNotifications();
+    await writeNotifications([notification, ...existing]);
+  });
 
-  // broadcast to all SSE clients
   broadcastSSE({ type: "new-notification", notification });
-
   return notification;
 }
 

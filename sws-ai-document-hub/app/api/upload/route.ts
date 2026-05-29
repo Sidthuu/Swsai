@@ -5,7 +5,7 @@ import path from "path";
 import { recordBulkProgress } from "@/app/api/notifications/route";
 import { createNotification } from "@/lib/notificationStore";
 
-const MAX_SIZE = 20 * 1024 * 1024; // 20 MB
+const MAX_SIZE = 20 * 1024 * 1024;
 const ALLOWED_TYPE = "application/pdf";
 const METADATA_PATH = path.join(process.cwd(), "data", "documents.json");
 
@@ -19,11 +19,28 @@ export interface DocMeta {
   uploadedAt: string;
 }
 
+// ── Mutex: serialise all read-modify-write on documents.json ─────────────────
+let metaLock: Promise<void> = Promise.resolve();
+
+async function withMetaLock<T>(fn: () => Promise<T>): Promise<T> {
+  let release!: () => void;
+  const next = new Promise<void>((res) => { release = res; });
+  const current = metaLock;
+  metaLock = next;
+  await current;          // wait for previous holder to finish
+  try {
+    return await fn();
+  } finally {
+    release();            // unblock the next waiter
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 async function readMeta(): Promise<DocMeta[]> {
   if (!existsSync(METADATA_PATH)) return [];
   try {
     const raw = await readFile(METADATA_PATH, "utf-8");
-    const trimmed = raw.replace(/^\uFEFF/, "").trim(); // strip BOM + whitespace
+    const trimmed = raw.replace(/^\uFEFF/, "").trim();
     return trimmed ? JSON.parse(trimmed) : [];
   } catch {
     return [];
@@ -44,13 +61,11 @@ export async function POST(req: NextRequest) {
 
   if (!file) return NextResponse.json({ error: "No file provided." }, { status: 400 });
 
-  // Backend validation
-  if (file.type !== ALLOWED_TYPE) {
+  if (file.type !== ALLOWED_TYPE)
     return NextResponse.json({ error: "Only PDF files are allowed." }, { status: 422 });
-  }
-  if (file.size > MAX_SIZE) {
+
+  if (file.size > MAX_SIZE)
     return NextResponse.json({ error: "File exceeds 20 MB limit." }, { status: 422 });
-  }
 
   const uploadDir = path.join(process.cwd(), "public", "uploads");
   if (!existsSync(uploadDir)) await mkdir(uploadDir, { recursive: true });
@@ -60,8 +75,7 @@ export async function POST(req: NextRequest) {
     const buffer = Buffer.from(bytes);
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const safeName = `${id}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-    const storagePath = path.join(uploadDir, safeName);
-    await writeFile(storagePath, buffer);
+    await writeFile(path.join(uploadDir, safeName), buffer);
 
     const meta: DocMeta = {
       id,
@@ -73,8 +87,11 @@ export async function POST(req: NextRequest) {
       uploadedAt: new Date().toISOString(),
     };
 
-    const existing = await readMeta();
-    await writeMeta([meta, ...existing]);
+    // Serialised write — safe under concurrent bulk uploads
+    await withMetaLock(async () => {
+      const existing = await readMeta();
+      await writeMeta([meta, ...existing]);
+    });
 
     if (jobId && jobTotal) {
       recordBulkProgress(jobId, jobTotal, true);
