@@ -20,13 +20,11 @@ export interface AppNotification {
 }
 
 interface NotificationCtx {
-  // toasts
   toasts: Toast[];
   addToast: (t: Toast) => void;
   dismissToast: (id: string) => void;
-  // document library refresh
   refresh: number;
-  // notification center
+  triggerRefresh: () => void;
   notifications: AppNotification[];
   unreadCount: number;
   fetchNotifications: () => Promise<void>;
@@ -35,7 +33,7 @@ interface NotificationCtx {
 }
 
 const Ctx = createContext<NotificationCtx>({
-  toasts: [], addToast: () => {}, dismissToast: () => {}, refresh: 0,
+  toasts: [], addToast: () => {}, dismissToast: () => {}, refresh: 0, triggerRefresh: () => {},
   notifications: [], unreadCount: 0,
   fetchNotifications: async () => {}, markRead: async () => {}, markAllRead: async () => {},
 });
@@ -47,6 +45,8 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   const [refresh, setRefresh] = useState(0);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+
+  const triggerRefresh = useCallback(() => setRefresh((r) => r + 1), []);
 
   const addToast = useCallback((t: Toast) =>
     setToasts((prev) => [...prev.filter((x) => x.id !== t.id), t]), []);
@@ -113,7 +113,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
   return (
     <Ctx.Provider value={{
-      toasts, addToast, dismissToast, refresh,
+      toasts, addToast, dismissToast, refresh, triggerRefresh,
       notifications, unreadCount, fetchNotifications, markRead, markAllRead,
     }}>
       {children}

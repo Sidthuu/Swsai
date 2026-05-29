@@ -84,7 +84,7 @@ function useProgressAnimator() {
 }
 
 export default function UploadZone() {
-  const { addToast, fetchNotifications } = useNotifications();
+  const { addToast, fetchNotifications, triggerRefresh } = useNotifications();
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [dragging, setDragging] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -130,10 +130,12 @@ export default function UploadZone() {
 
       xhr.onload = () => {
         const ok = xhr.status >= 200 && xhr.status < 300;
-        // snap to 100 immediately on completion
         clear(entry.id);
         updateEntry(entry.id, { progress: 100, status: ok ? "complete" : "failed" });
-        if (ok) fetchNotifications();
+        if (ok) {
+          triggerRefresh();      // refresh document library immediately
+          fetchNotifications();  // update notification bell
+        }
         active.current -= 1;
         drainQueue();
       };
@@ -148,8 +150,7 @@ export default function UploadZone() {
       xhr.open("POST", "/api/upload");
       xhr.send(fd);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [updateEntry, setTarget, setProgress, clear, fetchNotifications]
+    [updateEntry, setTarget, setProgress, clear, triggerRefresh, fetchNotifications]
   );
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
