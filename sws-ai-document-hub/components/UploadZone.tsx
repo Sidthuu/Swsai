@@ -1,7 +1,8 @@
 "use client";
 
-import { Upload, X, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
+import { Upload, X, CheckCircle, AlertCircle, Loader2, ChevronDown, ChevronUp } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
+import { Toast } from "./NotificationToast";
 
 type UploadStatus = "pending" | "uploading" | "complete" | "failed";
 
@@ -14,6 +15,8 @@ interface FileEntry {
 
 interface UploadZoneProps {
   onUploadComplete: () => void;
+  onToast: (toast: Toast) => void;
+  onDismissToast: (id: string) => void;
 }
 
 function formatSize(bytes: number) {
@@ -36,67 +39,110 @@ const STATUS_LABEL: Record<UploadStatus, string> = {
   failed: "Failed",
 };
 
-export default function UploadZone({ onUploadComplete }: UploadZoneProps) {
+const BULK_THRESHOLD = 3;
+
+export default function UploadZone({ onUploadComplete, onToast, onDismissToast }: UploadZoneProps) {
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [dragging, setDragging] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const singleRef = useRef<HTMLInputElement>(null);
   const bulkRef = useRef<HTMLInputElement>(null);
+  // track active bulk toast id so we can dismiss it on completion
+  const bulkToastId = useRef<string | null>(null);
 
-  const uploadFile = useCallback((entry: FileEntry, onComplete: () => void) => {
-    const xhr = new XMLHttpRequest();
-    const formData = new FormData();
-    formData.append("file", entry.file);
+  const uploadFile = useCallback(
+    (entry: FileEntry, jobId: string | null, jobTotal: number, onComplete: () => void) => {
+      const xhr = new XMLHttpRequest();
+      const formData = new FormData();
+      formData.append("file", entry.file);
+      if (jobId) {
+        formData.append("jobId", jobId);
+        formData.append("jobTotal", String(jobTotal));
+      }
 
-    xhr.upload.onprogress = (e) => {
-      if (!e.lengthComputable) return;
-      const pct = Math.round((e.loaded / e.total) * 100);
-      setEntries((prev) =>
-        prev.map((f) => f.id === entry.id ? { ...f, progress: pct, status: "uploading" } : f)
+      xhr.upload.onprogress = (e) => {
+        if (!e.lengthComputable) return;
+        const pct = Math.round((e.loaded / e.total) * 100);
+        setEntries((prev) =>
+          prev.map((f) => f.id === entry.id ? { ...f, progress: pct, status: "uploading" } : f)
+        );
+      };
+
+      xhr.onload = () => {
+        const success = xhr.status >= 200 && xhr.status < 300;
+        setEntries((prev) =>
+          prev.map((f) =>
+            f.id === entry.id ? { ...f, progress: 100, status: success ? "complete" : "failed" } : f
+          )
+        );
+        if (success) onComplete();
+      };
+
+      xhr.onerror = () => {
+        setEntries((prev) =>
+          prev.map((f) => f.id === entry.id ? { ...f, status: "failed" } : f)
+        );
+      };
+
+      xhr.open("POST", "/api/upload");
+      xhr.send(formData);
+    },
+    []
+  );
+
+  const addFiles = useCallback(
+    (files: File[]) => {
+      const isBulk = files.length > BULK_THRESHOLD;
+      const jobId = isBulk ? `job-${Date.now()}` : null;
+
+      const newEntries: FileEntry[] = files.map((file) => ({
+        id: `${Date.now()}-${Math.random()}`,
+        file,
+        progress: 0,
+        status: "pending" as UploadStatus,
+      }));
+
+      setEntries((prev) => [...prev, ...newEntries]);
+
+      if (isBulk) {
+        setCollapsed(true);
+        const toastId = `toast-progress-${jobId}`;
+        bulkToastId.current = toastId;
+        onToast({
+          id: toastId,
+          type: "progress",
+          message: `Upload in progress — processing ${files.length} files in background.`,
+        });
+      }
+
+      newEntries.forEach((entry) =>
+        uploadFile(entry, jobId, files.length, () => {
+          if (!isBulk) onUploadComplete();
+        })
       );
-    };
+    },
+    [uploadFile, onUploadComplete, onToast]
+  );
 
-    xhr.onload = () => {
-      const success = xhr.status >= 200 && xhr.status < 300;
-      setEntries((prev) =>
-        prev.map((f) =>
-          f.id === entry.id ? { ...f, progress: 100, status: success ? "complete" : "failed" } : f
-        )
-      );
-      if (success) onComplete();
-    };
-
-    xhr.onerror = () => {
-      setEntries((prev) =>
-        prev.map((f) => f.id === entry.id ? { ...f, status: "failed" } : f)
-      );
-    };
-
-    xhr.open("POST", "/api/upload");
-    xhr.send(formData);
-  }, []);
-
-  const addFiles = useCallback((files: File[]) => {
-    const newEntries: FileEntry[] = files.map((file) => ({
-      id: `${Date.now()}-${Math.random()}`,
-      file,
-      progress: 0,
-      status: "pending" as UploadStatus,
-    }));
-    setEntries((prev) => [...prev, ...newEntries]);
-    newEntries.forEach((entry) => uploadFile(entry, onUploadComplete));
-  }, [uploadFile, onUploadComplete]);
-
-  const onDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setDragging(false);
-    addFiles(Array.from(e.dataTransfer.files));
-  }, [addFiles]);
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragging(false);
+      addFiles(Array.from(e.dataTransfer.files));
+    },
+    [addFiles]
+  );
 
   const removeEntry = (id: string) =>
     setEntries((prev) => prev.filter((f) => f.id !== id));
 
+  const isBulkBatch = entries.length > BULK_THRESHOLD;
+  const doneCount = entries.filter((e) => e.status === "complete" || e.status === "failed").length;
+  const allDone = entries.length > 0 && doneCount === entries.length;
+
   return (
     <div className="space-y-4">
+      {/* Drop zone */}
       <div
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
@@ -130,48 +176,70 @@ export default function UploadZone({ onUploadComplete }: UploadZoneProps) {
         </div>
       </div>
 
+      {/* File list */}
       {entries.length > 0 && (
-        <div className="space-y-2">
-          {entries.map((entry) => (
-            <div key={entry.id}
-              className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-medium text-slate-800 truncate max-w-[260px]">
-                    {entry.file.name}
-                  </span>
-                  <div className="flex items-center gap-2 ml-3 shrink-0">
-                    <span className="text-xs text-slate-400">{formatSize(entry.file.size)}</span>
-                    <span className="text-xs text-slate-400">{entry.file.type || "unknown"}</span>
-                    <div className="flex items-center gap-1">
-                      {STATUS_ICON[entry.status]}
-                      <span className={`text-xs font-medium ${
-                        entry.status === "complete" ? "text-green-600" :
-                        entry.status === "failed" ? "text-red-500" :
-                        entry.status === "uploading" ? "text-blue-500" : "text-slate-400"
-                      }`}>
-                        {STATUS_LABEL[entry.status]}
-                      </span>
-                    </div>
-                    <span className="text-xs text-slate-500 w-8 text-right">{entry.progress}%</span>
-                  </div>
-                </div>
-                <div className="h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-300 ${
-                      entry.status === "complete" ? "bg-green-500" :
-                      entry.status === "failed" ? "bg-red-400" : "bg-blue-500"
-                    }`}
-                    style={{ width: `${entry.progress}%` }}
-                  />
-                </div>
-              </div>
-              <button onClick={() => removeEntry(entry.id)}
-                className="ml-2 text-slate-300 hover:text-slate-500 transition shrink-0">
-                <X size={16} />
+        <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+          {/* Header row for bulk */}
+          {isBulkBatch && (
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 bg-slate-50">
+              <span className="text-sm font-medium text-slate-700">
+                {allDone
+                  ? `${doneCount} files processed`
+                  : `Processing ${entries.length} files — ${doneCount}/${entries.length} done`}
+              </span>
+              <button
+                onClick={() => setCollapsed((c) => !c)}
+                className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 transition"
+              >
+                {collapsed ? <><ChevronDown size={14} /> Show</> : <><ChevronUp size={14} /> Hide</>}
               </button>
             </div>
-          ))}
+          )}
+
+          {/* Individual rows */}
+          {!collapsed && (
+            <div className="divide-y divide-slate-100">
+              {entries.map((entry) => (
+                <div key={entry.id} className="flex items-center gap-3 px-4 py-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-medium text-slate-800 truncate max-w-[260px]">
+                        {entry.file.name}
+                      </span>
+                      <div className="flex items-center gap-2 ml-3 shrink-0">
+                        <span className="text-xs text-slate-400">{formatSize(entry.file.size)}</span>
+                        <span className="text-xs text-slate-400">{entry.file.type || "unknown"}</span>
+                        <div className="flex items-center gap-1">
+                          {STATUS_ICON[entry.status]}
+                          <span className={`text-xs font-medium ${
+                            entry.status === "complete" ? "text-green-600" :
+                            entry.status === "failed" ? "text-red-500" :
+                            entry.status === "uploading" ? "text-blue-500" : "text-slate-400"
+                          }`}>
+                            {STATUS_LABEL[entry.status]}
+                          </span>
+                        </div>
+                        <span className="text-xs text-slate-500 w-8 text-right">{entry.progress}%</span>
+                      </div>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          entry.status === "complete" ? "bg-green-500" :
+                          entry.status === "failed" ? "bg-red-400" : "bg-blue-500"
+                        }`}
+                        style={{ width: `${entry.progress}%` }}
+                      />
+                    </div>
+                  </div>
+                  <button onClick={() => removeEntry(entry.id)}
+                    className="ml-2 text-slate-300 hover:text-slate-500 transition shrink-0">
+                    <X size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
