@@ -3,6 +3,7 @@ import { writeFile, mkdir, readFile } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
 import { recordBulkProgress } from "@/app/api/notifications/route";
+import { createNotification } from "@/lib/notificationStore";
 
 const MAX_SIZE = 20 * 1024 * 1024; // 20 MB
 const ALLOWED_TYPE = "application/pdf";
@@ -75,11 +76,16 @@ export async function POST(req: NextRequest) {
     const existing = await readMeta();
     await writeMeta([meta, ...existing]);
 
-    if (jobId && jobTotal) recordBulkProgress(jobId, jobTotal, true);
+    if (jobId && jobTotal) {
+      recordBulkProgress(jobId, jobTotal, true);
+    } else {
+      await createNotification(`${file.name} uploaded successfully.`, "SUCCESS");
+    }
 
     return NextResponse.json(meta);
   } catch {
     if (jobId && jobTotal) recordBulkProgress(jobId, jobTotal, false);
+    await createNotification(`${file.name} upload failed.`, "ERROR");
     return NextResponse.json({ error: "Upload failed." }, { status: 500 });
   }
 }
