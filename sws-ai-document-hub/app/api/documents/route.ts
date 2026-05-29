@@ -8,8 +8,13 @@ const METADATA_PATH = path.join(process.cwd(), "data", "documents.json");
 
 async function readMeta(): Promise<DocMeta[]> {
   if (!existsSync(METADATA_PATH)) return [];
-  const raw = await readFile(METADATA_PATH, "utf-8");
-  return JSON.parse(raw);
+  try {
+    const raw = await readFile(METADATA_PATH, "utf-8");
+    const trimmed = raw.replace(/^\uFEFF/, "").trim();
+    return trimmed ? JSON.parse(trimmed) : [];
+  } catch {
+    return [];
+  }
 }
 
 async function writeMeta(docs: DocMeta[]) {

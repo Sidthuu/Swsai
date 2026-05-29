@@ -3,7 +3,6 @@ import { readFile } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
 import { DocMeta } from "@/app/api/upload/route";
-import { readFile as readMetaFile } from "fs/promises";
 
 const METADATA_PATH = path.join(process.cwd(), "data", "documents.json");
 
@@ -13,8 +12,13 @@ export async function GET(req: NextRequest) {
 
   let docs: DocMeta[] = [];
   if (existsSync(METADATA_PATH)) {
-    const raw = await readMetaFile(METADATA_PATH, "utf-8");
-    docs = JSON.parse(raw);
+    try {
+      const raw = await readFile(METADATA_PATH, "utf-8");
+      const trimmed = raw.replace(/^\uFEFF/, "").trim();
+      docs = trimmed ? JSON.parse(trimmed) : [];
+    } catch {
+      docs = [];
+    }
   }
 
   const doc = docs.find((d) => d.id === id);
